@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Axolotl Bird</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #e0f2fe;
+        }
+        canvas {
+            border-radius: 1rem;
+            background-color: #7dd3fc;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            touch-action: none;
+        }
+        #game-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .message-box {
+            background-color: #ffffff;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .start-btn, .restart-btn, .consent-btn {
+            background-color: #6ee7b7;
+            color: #1f2937;
+            font-weight: bold;
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1-px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .start-btn:hover, .restart-btn:hover, .consent-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px -1-px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .radio-label {
+            cursor: pointer;
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            border: 2px solid #6ee7b7;
+            transition: background-color 0.2s;
+        }
+        input[type="radio"]:checked + .radio-label {
+            background-color: #6ee7b7;
+            color: #1f2937;
+            font-weight: bold;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #6ee7b7;
+        }
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
+    <div id="game-container" class="w-full max-w-lg flex flex-col items-center">
+        <canvas id="gameCanvas" class="w-full max-w-full aspect-video md:h-[600px]"></canvas>
+
+        <div id="message-box" class="absolute inset-0 flex items-center justify-center p-4 bg-gray-900 bg-opacity-70 rounded-xl m-8 hidden">
+            <div class="message-box p-8 rounded-xl text-center shadow-lg">
+                <h2 id="message-text" class="text-4xl font-extrabold mb-4 text-gray-800">Welcome!</h2>
+                <div id="buttons-container" class="flex justify-center space-x-4">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.onload = function() {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const messageBox = document.getElementById('message-box');
+            const messageText = document.getElementById('message-text');
+            const buttonsContainer = document.getElementById('buttons-container');
+
+            const floorHeight = 50;
+            function resizeCanvas() {
+                canvas.width = canvas.parentElement.offsetWidth;
+                canvas.height = canvas.parentElement.offsetHeight;
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            let score = 0;
+            let highScores = { easy: 0, medium: 0, hard: 0 };
+            let hasConsent = false;
+            let hasCachingEnabled = true;
+            let gameSpeed = 3;
+            const maxGameSpeed = 6;
+            const speedIncreaseFactor = 0.01;
+            let pipes = [];
+            let clouds = [];
+            let gameOver = false;
+            let currentDifficulty = 'medium';
+            let shouldEndGame = false;
+
+            const difficultySettings = {
+                easy: {
+                    minDistanceBetweenPipes: 850,
+                    gapHeight: 340
+                },
+                medium: {
+                    minDistanceBetweenPipes: 680,
+                    gapHeight: 255
+                },
+                hard: {
+                    minDistanceBetweenPipes: 510,
+                    gapHeight: 170
+                }
+            };
+            
+            const pipeWidth = 80;
+            const minVerticalClearance = 100;
+            
+            let currentEffect = null;
+            let effectStartTime = null;
+            const effectDuration = 5000; // 5 seconds
+            let minCloudDistance = 300;
+
+            const axolotlSVG = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="#ff7f50">
+                <g transform="scale(0.8) translate(10, 10)">
+                    <path d="M 50 80 Q 40 95 30 80 Q 20 65 30 50 Q 40 35 50 50 Z" stroke="#333" stroke-width="2" fill="#ff7f50"/>
+                    <path d="M 50 50 Q 60 40 70 50 Q 80 60 70 70 Z" stroke="#333" stroke-width="2" fill="#ffb4a2"/>
+                    <circle cx="65" cy="40" r="5" fill="#f08080" stroke="#333" stroke-width="1"/>
+                    <circle cx="60" cy="30" r="5" fill="#f08080" stroke="#333" stroke-width="1"/>
+                    <circle cx="70" cy="30" r="5" fill="#f08080" stroke="#333" stroke-width="1"/>
+                    <circle cx="68" cy="55" r="3" fill="#333"/>
+                    <path d="M 40 45 Q 30 30 15 40 Q 20 50 35 55 Z" stroke="#333" stroke-width="1" fill="#f4a261"/>
+                    <path d="M 45 60 Q 35 75 20 65 Q 25 80 40 70 Z" stroke="#333" stroke-width="1" fill="#f4a261"/>
+                </g>
+            </svg>`;
+
+            const axolotlImg = new Image();
+            const svgBlob = new Blob([axolotlSVG], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(svgBlob);
+            axolotlImg.src = url;
+
+            const axolotl = {
+                x: 100,
+                y: canvas.height / 2,
+                width: 60,
+                height: 60,
+                velocity: 0,
+                gravity: 0.3,
+                jumpPower: -5,
+                rotation: 0,
+
+                draw: function() {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(this.rotation);
+                    ctx.drawImage(axolotlImg, -this.width / 2, -this.height / 2, this.width, this.height);
+                    ctx.restore();
+                    
+                    if (currentEffect === 'shield') {
+                        ctx.beginPath();
+                        ctx.arc(this.x, this.y, this.width / 2 + 5, 0, Math.PI * 2);
+                        ctx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
+                        ctx.lineWidth = 5;
+                        ctx.stroke();
+                    }
+                },
+
+                update: function() {
+                    this.y += this.velocity;
+                    this.rotation = Math.min(Math.PI / 4, this.velocity * 0.1);
+                },
+
+                jump: function() {
+                    this.velocity = this.jumpPower;
+                }
+            };
+
+            class PipeObstacle {
+                constructor(difficulty) {
+                    this.x = canvas.width;
+                    this.width = pipeWidth;
+                    this.gap = difficultySettings[difficulty].gapHeight;
+                    const maxGapY = canvas.height - floorHeight - minVerticalClearance - this.gap;
+                    const minGapY = minVerticalClearance;
+                    this.gapY = minGapY + Math.random() * (maxGapY - minGapY);
+                    this.isScored = false;
+                }
+
+                draw() {
+                    ctx.fillStyle = '#65a30d';
+                    ctx.fillRect(this.x, 0, this.width, this.gapY);
+                    ctx.fillRect(this.x, this.gapY + this.gap, this.width, canvas.height - (this.gapY + this.gap));
+                }
+
+                update(speed) {
+                    this.x -= speed;
+                }
+            }
+
+            class Cloud {
+                constructor() {
+                    this.x = canvas.width;
+                    const maxCloudY = canvas.height - floorHeight - minVerticalClearance;
+                    const minCloudY = minVerticalClearance;
+                    this.y = minCloudY + Math.random() * (maxCloudY - minCloudY);
+                    this.radius = 20;
+                    const cloudTypes = ['green', 'yellow', 'red'];
+                    this.type = cloudTypes[Math.floor(Math.random() * cloudTypes.length)];
+                }
+
+                draw() {
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    switch(this.type) {
+                        case 'green':
+                            ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+                            break;
+                        case 'yellow':
+                            ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+                            break;
+                        case 'red':
+                            ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                            break;
+                    }
+                    ctx.fill();
+                }
+
+                update(speed) {
+                    this.x -= speed;
+                }
+            }
+
+            function checkCollision(obj1, obj2) {
+                const axolotlRect = {
+                    x: obj1.x - obj1.width / 2,
+                    y: obj1.y - obj1.height / 2,
+                    width: obj1.width,
+                    height: obj1.height
+                };
+
+                const topPipeRect = {
+                    x: obj2.x,
+                    y: 0,
+                    width: obj2.width,
+                    height: obj2.gapY
+                };
+                const collisionWithTop = axolotlRect.x < topPipeRect.x + topPipeRect.width &&
+                                         axolotlRect.x + axolotlRect.width > topPipeRect.x &&
+                                         axolotlRect.y < topPipeRect.y + topPipeRect.height &&
+                                         axolotlRect.y + axolotlRect.height > topPipeRect.y;
+
+                const bottomPipeRect = {
+                    x: obj2.x,
+                    y: obj2.gapY + obj2.gap,
+                    width: obj2.width,
+                    height: canvas.height - (obj2.gapY + obj2.gap)
+                };
+                const collisionWithBottom = axolotlRect.x < bottomPipeRect.x + bottomPipeRect.width &&
+                                            axolotlRect.x + axolotlRect.width > bottomPipeRect.x &&
+                                            axolotlRect.y < bottomPipeRect.y + bottomPipeRect.height &&
+                                            axolotlRect.y + axolotlRect.height > bottomPipeRect.y;
+
+                return collisionWithTop || collisionWithBottom;
+            }
+            
+            function gameLoop() {
+                if (gameOver) return;
+
+                // Check for effect expiration
+                if (currentEffect && effectStartTime && Date.now() - effectStartTime > effectDuration) {
+                    currentEffect = null;
+                    effectStartTime = null;
+                }
+                
+                let currentSpeed = Math.min(gameSpeed + score * speedIncreaseFactor, maxGameSpeed);
+                if (currentEffect === 'slowness') currentSpeed /= 2;
+                
+                axolotl.y += axolotl.velocity;
+                axolotl.velocity += axolotl.gravity;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Update and check for cloud collisions
+                let nextClouds = [];
+                for (const cloud of clouds) {
+                    const dx = axolotl.x - cloud.x;
+                    const dy = axolotl.y - cloud.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < axolotl.width / 2 + cloud.radius) {
+                        if (currentEffect === null) {
+                            switch(cloud.type) {
+                                case 'green':
+                                    currentEffect = 'shield';
+                                    effectStartTime = Date.now(); // Start timer for shield
+                                    break;
+                                case 'yellow':
+                                    currentEffect = 'slowness';
+                                    effectStartTime = Date.now();
+                                    break;
+                                case 'red':
+                                    currentEffect = 'blindness';
+                                    effectStartTime = Date.now();
+                                    break;
+                            }
+                        }
+                    } else {
+                        nextClouds.push(cloud);
+                    }
+                }
+                clouds = nextClouds;
+                
+                // Check for pipe collisions and wall collisions
+                let collisionOccurred = false;
+                if (axolotl.y > canvas.height - floorHeight - axolotl.height / 2 || axolotl.y < axolotl.height / 2) {
+                    if (currentEffect !== 'shield') {
+                        collisionOccurred = true;
+                    }
+                }
+                
+                let nextPipes = [];
+                for (const pipe of pipes) {
+                    if (checkCollision(axolotl, pipe)) {
+                        if (currentEffect !== 'shield') {
+                            collisionOccurred = true;
+                        }
+                    }
+
+                    if (axolotl.x > pipe.x + pipe.width && !pipe.isScored) {
+                        score++;
+                        pipe.isScored = true;
+                    }
+                    
+                    if (pipe.x + pipe.width > 0) {
+                        nextPipes.push(pipe);
+                    }
+                }
+                pipes = nextPipes;
+
+                if (collisionOccurred) {
+                    endGame('You hit an obstacle!');
+                    return;
+                }
+                
+                // Update and draw pipes and clouds
+                for (const cloud of clouds) {
+                    cloud.update(currentSpeed);
+                    cloud.draw();
+                }
+
+                for (const pipe of pipes) {
+                    pipe.update(currentSpeed);
+                    pipe.draw();
+                }
+                
+                // Spawn new pipes and clouds
+                if (pipes.length === 0 || canvas.width - pipes[pipes.length-1].x > difficultySettings[currentDifficulty].minDistanceBetweenPipes) {
+                    pipes.push(new PipeObstacle(currentDifficulty));
+                }
+
+                if (clouds.length === 0 || canvas.width - clouds[clouds.length-1].x > minCloudDistance) {
+                    clouds.push(new Cloud());
+                }
+
+                // Draw everything
+                if (currentEffect === 'blindness') {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.beginPath();
+                    ctx.arc(axolotl.x, axolotl.y, 80, 0, Math.PI * 2);
+                    ctx.fillStyle = '#000000';
+                    ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(0, canvas.height - floorHeight, canvas.width, floorHeight);
+
+                ctx.fillStyle = '#1f2937';
+                ctx.font = 'bold 3rem Inter, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(score, canvas.width / 2, 50);
+
+                if (currentEffect) {
+                    let effectText = '';
+                    switch (currentEffect) {
+                        case 'shield': effectText = 'Shield Active!'; break;
+                        case 'slowness': effectText = 'Slowness!'; break;
+                        case 'blindness': effectText = 'Blindness!'; break;
+                    }
+                    ctx.font = 'bold 1.5rem Inter, sans-serif';
+                    ctx.fillText(effectText, canvas.width / 2, 85);
+                    
+                    if (effectStartTime) {
+                        const timeLeft = Math.ceil((effectDuration - (Date.now() - effectStartTime)) / 1000);
+                        ctx.font = 'bold 1rem Inter, sans-serif';
+                        ctx.fillText(`Time Left: ${timeLeft}s`, canvas.width / 2, 110);
+                    }
+                }
+                
+                axolotl.rotation = Math.min(Math.PI / 4, axolotl.velocity * 0.1);
+                axolotl.draw();
+
+                requestAnimationFrame(gameLoop);
+            }
+
+            function endGame(reason) {
+                gameOver = true;
+                currentEffect = null; // Clear effect on game end
+                effectStartTime = null;
+                if (hasConsent && hasCachingEnabled && score > highScores[currentDifficulty]) {
+                    highScores[currentDifficulty] = score;
+                    localStorage.setItem(`axolotlHighScore_${currentDifficulty}`, highScores[currentDifficulty]);
+                    messageText.innerHTML = `Game Over! <br> ${reason} <br> New High Score on ${currentDifficulty} mode: ${highScores[currentDifficulty]}`;
+                } else {
+                     messageText.innerHTML = `Game Over! <br> ${reason} <br> Your score: ${score}<br>High Score on ${currentDifficulty} mode: ${highScores[currentDifficulty]}`;
+                }
+                buttonsContainer.innerHTML = `<button id="restartButton" class="restart-btn">Restart</button>`;
+                messageBox.classList.remove('hidden');
+                document.getElementById('restartButton').addEventListener('click', () => {
+                    showStartScreen();
+                });
+            }
+
+            function startGame() {
+                const selectedDifficulty = document.querySelector('input[name="difficulty"]:checked');
+                currentDifficulty = selectedDifficulty ? selectedDifficulty.value : 'medium';
+                gameOver = false;
+                score = 0;
+                pipes = [];
+                clouds = [];
+                axolotl.y = canvas.height / 2;
+                axolotl.velocity = 0;
+                currentEffect = null;
+                effectStartTime = null;
+                gameSpeed = 3;
+                pipes.push(new PipeObstacle(currentDifficulty));
+                messageBox.classList.add('hidden');
+                requestAnimationFrame(gameLoop);
+            }
+            
+            function handleJump() {
+                if (!gameOver) axolotl.jump();
+            }
+            
+            canvas.addEventListener('mousedown', handleJump);
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleJump();
+            });
+
+            function showConsentDialog() {
+                messageText.innerHTML = `This game would like to save your best scores on your device. Is that okay?
+                <div class="mt-4 text-sm text-gray-500">
+                    <h3 class="font-bold">Cache Function</h3>
+                    <div class="flex items-center justify-center mt-2 space-x-2">
+                        <label class="switch">
+                            <input type="checkbox" id="cache-toggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                        <span>Enable caching</span>
+                    </div>
+                    <p class="mt-2">This will improve your experience by saving some files on your device (this will help me make more games).</p>
+                </div>`;
+                buttonsContainer.innerHTML = `
+                    <button id="yesButton" class="consent-btn">Yes</button>
+                    <button id="noButton" class="consent-btn">No</button>
+                `;
+                messageBox.classList.remove('hidden');
+
+                document.getElementById('yesButton').addEventListener('click', () => {
+                    hasCachingEnabled = document.getElementById('cache-toggle').checked;
+                    localStorage.setItem('hasGivenConsent', 'yes');
+                    localStorage.setItem('hasCachingEnabled', hasCachingEnabled);
+                    hasConsent = true;
+                    loadHighScores();
+                    showStartScreen();
+                });
+                
+                document.getElementById('noButton').addEventListener('click', () => {
+                    localStorage.setItem('hasGivenConsent', 'no');
+                    localStorage.setItem('hasCachingEnabled', 'false');
+                    hasConsent = false;
+                    hasCachingEnabled = false;
+                    showStartScreen();
+                });
+            }
+            
+            function loadHighScores() {
+                if (hasCachingEnabled) {
+                    const difficulties = ['easy', 'medium', 'hard'];
+                    difficulties.forEach(difficulty => {
+                        const storedScore = localStorage.getItem(`axolotlHighScore_${difficulty}`);
+                        if (storedScore !== null) {
+                            highScores[difficulty] = parseInt(storedScore, 10);
+                        }
+                    });
+                } else {
+                    highScores = { easy: 0, medium: 0, hard: 0 };
+                }
+            }
+            
+            function showStartScreen() {
+                const highScoresDisplay = hasConsent && hasCachingEnabled ? `
+                    <p class="text-sm text-gray-600 mt-2">Best Scores:</p>
+                    <ul class="text-xs text-gray-500 list-disc list-inside">
+                        <li>Easy: ${highScores.easy}</li>
+                        <li>Medium: ${highScores.medium}</li>
+                        <li>Hard: ${highScores.hard}</li>
+                    </ul>
+                ` : '';
+
+                messageText.innerHTML = `Welcome to Axolotl Bird!
+                    <div class="mt-4 flex flex-col items-center">
+                        <h3 class="text-lg font-bold mb-2">Choose your difficulty:</h3>
+                        <div class="flex space-x-2">
+                            <input type="radio" id="easy" name="difficulty" value="easy" class="hidden" checked>
+                            <label for="easy" class="radio-label">Easy</label>
+
+                            <input type="radio" id="medium" name="difficulty" value="medium" class="hidden">
+                            <label for="medium" class="radio-label">Medium</label>
+
+                            <input type="radio" id="hard" name="difficulty" value="hard" class="hidden">
+                            <label for="hard" class="radio-label">Hard</label>
+                        </div>
+                    </div>
+                    ${highScoresDisplay}`;
+                buttonsContainer.innerHTML = `<button id="startButton" class="start-btn">Start Game</button>`;
+                document.getElementById('startButton').addEventListener('click', startGame);
+                messageBox.classList.remove('hidden');
+            }
+
+            const consentStatus = localStorage.getItem('hasGivenConsent');
+            if (consentStatus === null) {
+                showConsentDialog();
+            } else {
+                hasConsent = consentStatus === 'yes';
+                const cachingStatus = localStorage.getItem('hasCachingEnabled');
+                hasCachingEnabled = cachingStatus === 'true';
+                loadHighScores();
+                showStartScreen();
+            }
+        };
+    </script>
+</body>
+</html>
